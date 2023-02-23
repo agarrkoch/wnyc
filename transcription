@@ -1,0 +1,143 @@
+import os
+import subprocess
+import datetime
+import speech_recognition as sr
+import xlsxwriter
+
+def clips ():
+    if cliplength == 30 or cliplength <30:
+        if cliplength == 30:
+            clipSTa.append(0+clipstart)
+            clipLEa.append(30)
+        if cliplength < 30:
+            clipSTa.append(0+clipstart)
+            clipLEa.append(cliplength)
+
+    else:
+        clipSTa.append(0+clipstart)
+        clipLEa.append(30)
+        clipST = 0
+        while clipST + 30 < cliplength - 31:
+            if clipST == 0:
+                clipST = clipST + 29
+                clipSTa.append(clipST+clipstart)
+                clipLEa.append(31)
+            else:
+                clipST = clipST + 30
+                clipSTa.append(clipST+clipstart)
+                clipLEa.append(31)
+        if clipST < cliplength:
+            clipST = clipST + 30
+            clipSTa.append(clipST+clipstart)
+            remainder = cliplength - clipST
+            clipLEa.append(remainder)
+
+
+
+def ffmpeg(filenameNoSpace):
+    x = 0
+    numclips = len(clipSTa)
+    while x < numclips:
+        filenameNoSpaceNEW = filenameNoSpace + "PART" + str(x+1) + ".wav"
+
+        #clip
+        filepathNEW1 = str(dfolder)+"\\"+"CLIPPED"+str(filenameNoSpaceNEW)
+        starti = str(clipSTa[x])
+        lengthi = str(clipLEa[x])
+        subprocess.run(["ffmpeg", "-ss", starti, "-t", lengthi, "-i", filepathO, filepathNEW1])
+
+        #mono
+        filepathNEW2 = str(dfolder) + "\\" + "CLIPPEDM" + str(filenameNoSpaceNEW)
+        subprocess.run(["ffmpeg", "-i", filepathNEW1, "-ac", "1", filepathNEW2])
+        os.remove(filepathNEW1)
+
+        #44.1 kHZ
+        filepathNEW3 = str(dfolder) + "\\" + "CLIPPEDM44" + str(filenameNoSpaceNEW)
+        subprocess.run(["ffmpeg", "-i", filepathNEW2, "-ar", "44100", filepathNEW3])
+        os.remove(filepathNEW2)
+
+        x = x +1
+
+def transcription(pcol, tcol):
+    r = sr.Recognizer()
+    transcriptstring = ""
+    for clip in os.listdir(dfolder):
+        clippath = dfolder + "\\" + clip
+        with sr.AudioFile(os.path.abspath(clippath)) as source:
+            audio = r.record(source)  # read the entire audio file
+            newtranscriptstring = str(r.recognize_google(audio, language = 'en', show_all=True))
+            if "{'transcript': '" in newtranscriptstring:
+                newtranscriptstring = newtranscriptstring.split("{'transcript': '")[-1]
+                newtranscriptstring = newtranscriptstring.split("'}], 'final': True}")[0]
+            if "{'transcript': \"" in newtranscriptstring:
+                newtranscriptstring = newtranscriptstring.split("{'transcript': \"")[-1]
+                newtranscriptstring = newtranscriptstring.split("\"}], 'final': True}")[0]
+            if "', '" in newtranscriptstring:
+                newtranscriptstring = newtranscriptstring.split("', '")[0]
+            transcriptstring = transcriptstring + " / " + newtranscriptstring
+        os.remove(clippath)
+    transcriptstring = transcriptstring.split('/', 1)[1]
+    print(transcriptstring)
+    worksheet.write(pcol, filepathO)
+    worksheet.write(tcol, transcriptstring)
+
+
+##turn into arguments
+ufolder = input('Enter directory of wav files: ')
+while os.path.isdir(ufolder) == False:
+    ufolder = input('Directory path not valid, please re-enter: ')
+
+clipstart = input('Enter clip start (seconds): ')
+clipstart = int(clipstart)
+
+cliplength = input('Enter desired clip length (seconds): ')
+while cliplength == "0":
+    cliplength = input('Clip length cannot be 0, please re-enter: ')
+cliplength = int(cliplength)
+
+now = str(datetime.datetime.now())
+now = now.split('.')[0]
+nowdate = now.split(' ')[0]
+nowtime = now.split(' ')[1]
+nowtime = nowtime.replace(":","")
+now = nowdate+"_"+nowtime
+
+downloads = os.path.join(os.path.join(os.environ['USERPROFILE']), 'Downloads')
+dfolder = downloads + "\\" + "Transcription" + now
+os.makedirs(dfolder)
+
+#variables
+clipSTa = [] #clip start times
+clipLEa =[] #clip lengths
+clipST = 0
+
+#excel doc
+workbook = xlsxwriter.Workbook(dfolder + "\\" + "Transcription" + now + ".xlsx")
+worksheet = workbook.add_worksheet()
+worksheet.write('A1', 'File')
+worksheet.write('B1', 'Transcription')
+
+numwaves = 0
+for filename in os.listdir(ufolder):
+    if filename.endswith(".wav"):
+        numwaves = numwaves +1
+
+#call functions in this order
+clips() #determines clip indexes
+
+x=0
+y=2
+for filename in os.listdir(ufolder):
+    if (filename.endswith(".wav")):
+        filepathO = str(ufolder) + "\\" + str(filename)
+        filenameNoSpace = filename.split(" ")[0]
+        ffmpeg(filenameNoSpace) #cuts clips, compresses to mono and 44.1 khz
+        pcol = 'A' + str(y)
+        tcol = 'B' + str(y)
+        print("Transcribing Clip " + str(x+1) + " of " + str(numwaves) + ": " + filenameNoSpace)
+        transcription(pcol, tcol) #transcribes and outputs to excel
+        y = y + 1
+        x = x + 1
+
+workbook.close()
+os.startfile(dfolder + "\\" + "Transcription" + now + ".xlsx")
