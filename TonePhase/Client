@@ -1,0 +1,114 @@
+from AudioTones import AudioTones
+from ExcelToneLog import ExcelToneLog as ETL
+import os
+import matplotlib.pyplot as plt
+import gc
+import psutil
+
+
+def write():
+    log.worksheet.write(row, 0, file)
+    col = 1
+    for tone in a1.tones:
+        log.worksheet.write(row, col, a1.start(tone, 1) + ' - ' + a1.end(tone, 1))
+        log.worksheet.write(row, col + 1, a1.freq(tone, 1))
+        log.worksheet.write(row, col + 2, a1.peakv(tone, 1))
+        log.worksheet.write(row, col + 3, a1.rmsv(tone, 1))
+
+        col = col + 8
+
+    col = 1
+    for tone in a1.tones2:
+        log.worksheet.write(row, col + 4, a1.freq(tone, 2))
+        log.worksheet.write(row, col + 5, a1.peakv(tone, 2))
+        log.worksheet.write(row, col + 6, a1.rmsv(tone, 2))
+        log.worksheet.write(row, col + 7, a1.phaseshiftv(tone, 2))
+
+        col = col + 8
+
+def plotting():
+    plt.rcParams['figure.dpi'] = 100
+    plt.rcParams['figure.figsize'] = (9, 7)
+
+    if a1.channels == 2:
+        plt.rcParams['agg.path.chunksize'] = 10000
+        plt.subplot(2, 1, 1)
+        plt.plot(a1.time, a1.s1, 'r')
+        plt.xlabel("time, s [left channel]")
+        plt.ylabel("signal, relative units")
+        for key in a1.tones:
+            seconds = a1.tones[key][1] * a1.unit
+            seconds2 = a1.tones[key][2] * a1.unit
+            plt.axvline(x=seconds, color='y', linewidth=0.75)
+            plt.axvline(x=seconds2, color='y', linewidth=0.75)
+
+        plt.subplot(2, 1, 2)
+        plt.plot(a1.time, a1.s2, 'b')
+        plt.xlabel("time, s [right channel]")
+        plt.ylabel("signal, relative units")
+        for key in a1.tones2:
+            seconds = a1.tones2[key][1] * a1.unit
+            seconds2 = a1.tones2[key][2] * a1.unit
+            plt.axvline(x=seconds, color='y', linewidth=0.75)
+            plt.axvline(x=seconds2, color='y', linewidth=0.75)
+        plt.tight_layout()
+        plt.savefig(plot_fig, dpi = 1000)
+        plt.close()
+
+    if a1.channels == 1:
+        plt.rcParams['agg.path.chunksize'] = 10000
+        plt.subplot(1, 1, 1)
+        plt.plot(a1.time, a1.s1, 'r')
+        plt.xlabel("time, s [mono channel]")
+        plt.ylabel("signal, relative units")
+        for key in a1.tones:
+            seconds = a1.tones[key][1] * a1.unit
+            seconds2 = a1.tones[key][2] * a1.unit
+            plt.axvline(x=seconds, color='y', linewidth=0.75)
+            plt.axvline(x=seconds2, color='y', linewidth=0.75)
+        plt.savefig(plot_fig, dpi = 1000)
+        plt.close()
+
+folder = r"W:\ARCHIVESNAS1\INGEST\Reference_tones_examples\correlation\Four two-channel 1 k sine waves with phase at +1.0, 0.0, -0.5, -1.0"
+log = ETL(folder)
+row = 1
+fig_folder = folder + '\\' + "plotfigs"
+os.makedirs(fig_folder)
+
+for file in os.listdir(folder):
+    if file.__contains__(".wav"):
+        memory_usage = psutil.Process().memory_info().rss
+        print("Memory usage, beginning of loop:", memory_usage, "bytes")
+
+        f = folder + '\\' + file
+        plot_fig = fig_folder + "\\" + file.split(".wav")[0] + ".png"
+        print(f'Analyzing {file}, #{row} of 235')
+
+        a1 = AudioTones(f, 0.5, 0.08, 8, 500)
+        memory_usage = psutil.Process().memory_info().rss
+        print("Memory usage, after creating audiotones object:", memory_usage, "bytes")
+
+        print(a1.tones)
+        print(a1.tones2)
+        print(f'Writing {file}')
+        write()
+        memory_usage = psutil.Process().memory_info().rss
+        print("Memory usage, after writing in to excel file:", memory_usage, "bytes")
+
+        if a1.tones:
+            print(f'Plotting {file}')
+            plotting()
+            memory_usage = psutil.Process().memory_info().rss
+            print("Memory usage, after plotting:", memory_usage, "bytes")
+
+        row = row + 1
+        del a1
+
+        memory_usage = psutil.Process().memory_info().rss
+        print("Memory usage, after deleting object:", memory_usage, "bytes")
+
+        gc.collect()
+        memory_usage = psutil.Process().memory_info().rss
+        print("Memory usage, after garbage collection:", memory_usage, "bytes")
+
+log.workbook.close()
