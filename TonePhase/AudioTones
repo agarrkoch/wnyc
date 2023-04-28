@@ -1,0 +1,300 @@
+import math
+import numpy as np
+from scipy.io import wavfile
+import time
+from scipy.signal import correlate
+#np.seterr(divide = 'ignore')
+
+class AudioTones:
+    file = None #filepath
+
+    unit = None  # unit of sound analysis, a non-zero decimal between 0 and 1; default is 1
+    sensitivity = None  # tone detection sensitivty, a non-zero decimal between 0 and 1; default is 0.01
+    tone_length = None  # length of tone, an integer greater 1; default is 10
+    segment = None #first x seconds of the audio file that should be analyzed, where is x is an integer greater than -1
+
+    bdepth = None
+    bdepthr = None
+    sampfreq = None
+    s1 = None
+    s2 = None
+    time = None
+
+    channels = None
+    tones = {}  # tone information hashtable, formatted key.get = [frequency, start, end, peak, rms]
+    tones2 = {} # tone information hashtable in case of second channel, formatted key.get = [frequency, start, end, peak, rms, phase]
+
+    def __init__(self, f, u, s, t, seg):
+        self.file = f
+        self.unit = u
+        self.sensitivity = s
+        self.tone_length = t
+        self.segment = seg
+
+        self.signal()
+
+    def compare(self, val1, val2, s):
+        diff = abs((val2 - val1) / val1)
+
+        if s == 'db':
+            sens = self.sensitivity * 1.5
+        else:
+            sens = self.sensitivity
+
+        if diff < sens:
+            return True
+        else:
+            return False
+
+    def start(self, key, c):
+        if c == 1:
+            seconds = self.tones[key][1] * self.unit
+            return time.strftime(f'%H:%M:%S', time.gmtime(seconds))
+        if c == 2:
+            seconds = self.tones2[key][1] * self.unit
+            return time.strftime(f'%H:%M:%S', time.gmtime(seconds))
+
+    def end(self, key, c):
+        if c == 1:
+            seconds = self.tones[key][2] * self.unit
+            return time.strftime(f'%H:%M:%S', time.gmtime(seconds))
+        if c == 2:
+            seconds = self.tones2[key][2] * self.unit
+            return time.strftime(f'%H:%M:%S', time.gmtime(seconds))
+
+    def freq(self, key, c):
+        if c == 1:
+            return "%.2f" % (self.tones[key][0])
+        if c == 2:
+            return "%.2f" % (self.tones2[key][0])
+
+    def peakv(self, key, c):
+        if c == 1:
+            return "%.2f" % (self.tones[key][3])
+        if c == 2:
+            return "%.2f" % (self.tones2[key][3])
+
+    def rmsv(self, key, c):
+        if c == 1:
+            return "%.2f" % (self.tones[key][4])
+        if c == 2:
+            return "%.2f" % (self.tones2[key][4])
+
+    def phaseshiftv(self, key, c):
+        if c == 1:
+            return None
+        if c == 2:
+            return "%.2f" % (self.tones[key][5])
+
+    def silence(self, s):
+        maxrange = self.bdepthr*2
+        realrange = max(s) - min(s)
+
+        if (realrange / maxrange) < 0.01:
+            return True
+        else:
+            return False
+
+    def signal(self):
+        sampFreq, sound = wavfile.read(self.file)
+        dpoints = sound.shape[0]
+        self.bdepth = int(str(sound.dtype).split('int')[1])
+        self.bdepthr = 2**(self.bdepth - 1)
+        self.sampfreq = sampFreq
+
+        if self.segment > 0 and sampFreq * self.segment < dpoints:
+            dpoints = sampFreq * self.segment
+
+        length_in_s = dpoints / sampFreq
+        self.time = np.arange(dpoints) / dpoints * length_in_s
+
+        try:
+            if sound.shape[1]:
+                self.channels = sound.shape[1]
+        except:
+            self.channels = 1
+
+        if self.channels == 1:
+            s1 = sound[0:dpoints]
+            self.s1 = s1
+            self.tonedetect(s1, sampFreq, dpoints, 1)
+
+        if self.channels == 2:
+            s1 = sound[:, 0][0:dpoints]
+            self.s1 = s1
+            self.tonedetect(s1, sampFreq, dpoints, 1)
+
+
+            s2 = sound[:, 1][0:dpoints]
+            self.s2 = s2
+            self.tonedetect(s2, sampFreq, dpoints, 2)
+
+
+    def tonedetect(self, s, sampFreq, dpoints, c):
+        tones = {}
+        tone = 1
+        tone_length = self.tone_length / self.unit
+
+        unit = int(sampFreq * self.unit)
+        loops = int(dpoints / unit)
+        remainder = dpoints % unit
+
+        i = 0
+        while i < loops:
+            if self.silence(s[unit * i:unit * (i + 1)]):
+                #print(f'Silence detected at {i}')
+                #print()
+                i = i + 1
+                continue
+
+            fft_spectrum = np.fft.rfft(s[unit * i:unit * (i + 1)])
+            freq = np.fft.rfftfreq(s[unit * i:unit * (i + 1)].size, d=1. / sampFreq)
+            fft_spectrum_abs = np.abs(fft_spectrum)
+
+            x = np.where(fft_spectrum_abs == max(fft_spectrum_abs))
+            peak = freq[x][0]
+            dbpeak = self.peak(s[unit * i:unit * (i + 1)])
+
+            #print(i)
+            #print(peak)
+            #print(dbpeak)
+
+
+            if tone not in tones:
+                tones[tone] = [peak, i, i + 1, dbpeak, None]
+            else:
+                dbcomp = self.compare(tones[tone][3], dbpeak, 'db')
+                freqcomp = self.compare(tones[tone][0], peak, 'f')
+                #print(f'Comparing previous peak ({tones[tone][0]}) with current peak ({peak}): {freqcomp}')
+                #print(f'Comparing previous DB {tones[tone][3]} with current DB {dbpeak}: {dbcomp}')
+
+                if self.compare(tones[tone][0], peak, 'f') and self.compare(tones[tone][3], dbpeak, 'db') and i - tones[tone][2] == 0: #if frequencies and db similar
+                    #print ('frequency and db are similar!')
+                    num_avg = tones[tone][2] - tones[tone][1] + 1
+                    tones[tone][0] = ((tones[tone][0] * num_avg) + peak) / (num_avg + 1)
+                    tones[tone][2] = i + 1
+                else: #frequencies or volumes are not similar
+                    if tones[tone][2] - tones[tone][1] < tone_length: #casts off anomolous sounds, and replaces
+                        #print('frequency or db are not similar! discarding previous tone.')
+                        tones[tone] = [peak, i, i + 1, dbpeak, None]
+                    else:
+                        #print('frequency or db are not similar! adding new tone')
+                        tone = tone + 1 #begins a new tone/key
+                        tones[tone] = [peak, i, i + 1, dbpeak, None]
+
+            i = i + 1
+            if i == loops and remainder != 0:
+                if self.silence(s[unit * i:unit * i + remainder]):
+                    i = i + 1
+                    continue
+
+                fft_spectrum = np.fft.rfft(s[unit * i:unit * i + remainder])
+                freq = np.fft.rfftfreq(s[unit * i:unit * i + remainder].size, d=1. / sampFreq)
+                fft_spectrum_abs = np.abs(fft_spectrum)
+
+                x = np.where(fft_spectrum_abs == max(fft_spectrum_abs))
+                peak = freq[x][0]
+                dbpeak = self.peak(s[unit * i:unit * (i + 1)])
+
+
+                if tone not in tones:
+                    tones[tone] = [peak, i, i + (remainder / unit), dbpeak, None]
+                else:
+                    if self.compare(tones[tone][0], peak, 'f') and self.compare(tones[tone][3], dbpeak, 'db'):
+                        num_avg = tones[tone][2] - tones[tone][1] + 1
+                        tones[tone][0] = ((tones[tone][0] * num_avg) + peak) / (num_avg + 1)
+                        tones[tone][2] = i + (remainder / unit)
+                    else:
+                        if tones[tone][2] - tones[tone][1] < tone_length:
+                            tones[tone] = [peak, i, i + (remainder / unit), dbpeak, None]
+                        else:
+                            tone = tone + 1
+                            tones[tone] = [peak, i, i + (remainder / unit), dbpeak, None]
+            #print(tones)
+            #print()
+
+        if tones:
+            if tones[tone][2] - tones[tone][1] < tone_length:
+                del tones[tone]
+
+        if c == 1:
+            self.tones = tones
+        else:
+            self.tones2 = tones
+
+        self.audit(unit, sampFreq)
+
+
+    def audit(self, u, sampFreq):
+        for tone in self.tones:
+            start = int(self.tones[tone][1] * u)
+            end = int(self.tones[tone][2] * u)
+
+            fft_spectrum = np.fft.rfft(self.s1[start:end])
+            freq = np.fft.rfftfreq(self.s1[start:end].size, d=1. / sampFreq)
+            fft_spectrum_abs = np.abs(fft_spectrum)
+
+            x = np.where(fft_spectrum_abs == max(fft_spectrum_abs))
+            peak = freq[x][0]
+
+            self.tones[tone][0] = peak
+            self.tones[tone][3] = self.peak(self.s1[start:end])
+            self.tones[tone][4] = self.rms(self.s1[start:end])
+
+
+        if self.channels == 2:
+            for tone in self.tones2:
+                start = int(self.tones2[tone][1] * u)
+                end = int(self.tones2[tone][2] * u)
+                fft_spectrum = np.fft.rfft(self.s2[start:end])
+                freq = np.fft.rfftfreq(self.s2[start:end].size, d=1. / sampFreq)
+                fft_spectrum_abs = np.abs(fft_spectrum)
+
+                x = np.where(fft_spectrum_abs == max(fft_spectrum_abs))
+                peak = freq[x][0]
+
+                self.tones2[tone][0] = peak
+                self.tones2[tone][3] = self.peak(self.s2[start:end])
+                self.tones2[tone][4] = self.rms(self.s2[start:end])
+
+                self.tones[tone].append(self.phaseshift(self.tones[tone][0], start))
+
+    def phaseshift(self, f, s):
+
+        # find period in terms of samples
+        period = (1 / f) * self.sampfreq
+
+        # Generate two signals
+        x = self.s1[s:s+int(period * 2)]  # Signal 1
+        y = self.s2[s:s+int(period * 2)]  # Signal 2 out of phase with Signal 1
+
+        x = x / self.bdepth
+        y = y / self.bdepthr
+
+        # Compute the cross-correlation
+        corr = correlate(x, y)
+
+        # Find the index of the maximum correlation
+        max_corr_idx = np.argmax(corr)
+
+        # Find the time lag between the two signals
+        time_lag = np.linspace(-len(x) + 1, len(x) - 1, 2 * len(x) - 1)[max_corr_idx]
+
+        # phase
+        phase_meter = np.cos(2 * np.pi * f * time_lag / self.sampfreq)
+        return phase_meter
+
+    def peak(self, s):
+        #s = np.array(s, dtype=np.float64)
+        s = np.absolute(s)
+
+        return (20*math.log10(max(s)/self.bdepthr))
+
+    def rms(self, s):
+        s = s / self.bdepthr
+        rms = math.sqrt(np.mean(s**2))
+
+        return (20 * np.log10(rms))
+
+#f = r"E:\29203\data\test\WQXR-VCLS-1983-02-10-88236.2 1654 Visit with Alfredo Kraus.wav"
+#a1 = AudioTones(f, 5, 0.01, 10, 330)
