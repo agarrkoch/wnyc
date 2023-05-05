@@ -22,7 +22,8 @@ def write():
         log.worksheet.write(row, col + 4, a1.freq(tone, 2))
         log.worksheet.write(row, col + 5, a1.peakv(tone, 2))
         log.worksheet.write(row, col + 6, a1.rmsv(tone, 2))
-        log.worksheet.write(row, col + 7, a1.phaseshiftv(tone, 2))
+        if tone in a1.tones and len(a1.tones[tone]) == 6:
+            log.worksheet.write(row, col + 7, a1.phaseshiftv(tone, 2))
 
         col = col + 8
 
@@ -69,46 +70,75 @@ def plotting():
         plt.savefig(plot_fig, dpi = 1000)
         plt.close()
 
-folder = r"W:\ARCHIVESNAS1\INGEST\Reference_tones_examples\correlation\Four two-channel 1 k sine waves with phase at +1.0, 0.0, -0.5, -1.0"
+
+
+# Ask user which directory to search
+input1 = input('File path: ')
+while os.path.isdir(input1) == False:
+    input1 = input('Directory path not valid, please re-enter: ')
+folder = str(input1)
+
+# Count the number of files with the ".wav" extension
+count = 0
+for file in os.listdir(folder):
+    if file.endswith(".wav"):
+        count += 1
+
 log = ETL(folder)
 row = 1
 fig_folder = folder + '\\' + "plotfigs"
 os.makedirs(fig_folder)
 
+# Ask user for sensitivity
+input2 = input('Sensitivity (a non-zero decimal between 0 and 1; default is 0.05): ')
+while float(input2) <= 0 or float(input2) >= 1:
+    input2 = input('Input not valid, please re-enter: ')
+s = float(input2)
+
+input3 = input('Tone length (seconds; default is 8): ')
+while input3.isdigit() == False:
+    input3 = input('Input not valid, please re-enter: ')
+t = int(input3)
+
+input4 = input('Analysis length (seconds; default is 500): ')
+while input4.isdigit() == False:
+    input4 = input('Input not valid, please re-enter: ')
+a = int(input4)
+
+input5 = input('Plot (Y or N): ')
+while input5.lower() != 'y' and input5.lower() != 'n':
+    input5 = input('Input not valid, please re-enter: ')
+p = input5
+
+
 for file in os.listdir(folder):
     if file.__contains__(".wav"):
-        memory_usage = psutil.Process().memory_info().rss
-        print("Memory usage, beginning of loop:", memory_usage, "bytes")
+        #memory_usage = psutil.Process().memory_info().rss
 
         f = folder + '\\' + file
         plot_fig = fig_folder + "\\" + file.split(".wav")[0] + ".png"
-        print(f'Analyzing {file}, #{row} of 235')
+        print(f'Analyzing {file}, #{row} of {count}')
 
-        a1 = AudioTones(f, 0.5, 0.08, 8, 500)
-        memory_usage = psutil.Process().memory_info().rss
-        print("Memory usage, after creating audiotones object:", memory_usage, "bytes")
+        a1 = AudioTones(f, 0.5, s, t, a)
+        #memory_usage = psutil.Process().memory_info().rss
 
-        print(a1.tones)
-        print(a1.tones2)
-        print(f'Writing {file}')
+        #print(a1.tones)
+        #print(a1.tones2)
+        print(f'Writing......')
         write()
-        memory_usage = psutil.Process().memory_info().rss
-        print("Memory usage, after writing in to excel file:", memory_usage, "bytes")
+        #memory_usage = psutil.Process().memory_info().rss
 
-        if a1.tones:
-            print(f'Plotting {file}')
+        if a1.tones and p.lower() == 'y':
+            print(f'Plotting......')
             plotting()
-            memory_usage = psutil.Process().memory_info().rss
-            print("Memory usage, after plotting:", memory_usage, "bytes")
+            #memory_usage = psutil.Process().memory_info().rss
 
         row = row + 1
         del a1
 
-        memory_usage = psutil.Process().memory_info().rss
-        print("Memory usage, after deleting object:", memory_usage, "bytes")
+        #memory_usage = psutil.Process().memory_info().rss
 
         gc.collect()
-        memory_usage = psutil.Process().memory_info().rss
-        print("Memory usage, after garbage collection:", memory_usage, "bytes")
+        #memory_usage = psutil.Process().memory_info().rss
 
 log.workbook.close()
